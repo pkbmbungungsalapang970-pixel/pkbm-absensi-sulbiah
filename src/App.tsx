@@ -269,13 +269,22 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const now = new Date();
-    const witaDate = new Date(
-      now.toLocaleString("en-US", { timeZone: "Asia/Makassar" })
-    );
-    const date = witaDate.toISOString().split("T")[0];
-    const time = witaDate
-      .toLocaleTimeString("en-GB", { timeZone: "Asia/Makassar", hour12: false })
-      .slice(0, 8);
+    const makassarTime = new Intl.DateTimeFormat("id-ID", {
+      timeZone: "Asia/Makassar",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(now);
+
+    const getPart = (part) => makassarTime.find((p) => p.type === part)?.value;
+    const date = `${getPart("year")}-${getPart("month")}-${getPart("day")}`;
+    const time = `${getPart("hour")}:${getPart("minute")}:${getPart(
+      "second"
+    )}`.slice(0, 8);
 
     const lastLogoutTime = localStorage.getItem("lastLogoutTime");
     const initialTime = lastLogoutTime || time;
@@ -340,15 +349,19 @@ const App: React.FC = () => {
     // Fungsi untuk memperbarui waktu secara real-time
     const interval = setInterval(() => {
       const now = new Date();
-      const witaDate = new Date(
-        now.toLocaleString("en-US", { timeZone: "Asia/Makassar" })
-      );
-      const time = witaDate
-        .toLocaleTimeString("en-GB", {
-          timeZone: "Asia/Makassar",
-          hour12: false,
-        })
-        .slice(0, 8);
+      const makassarTime = new Intl.DateTimeFormat("id-ID", {
+        timeZone: "Asia/Makassar",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).formatToParts(now);
+
+      const getPart = (part) =>
+        makassarTime.find((p) => p.type === part)?.value;
+      const time = `${getPart("hour")}:${getPart("minute")}:${getPart(
+        "second"
+      )}`.slice(0, 8);
       setForm((prev: FormState): FormState => ({ ...prev, time }));
       setTeacherForm(
         (prev: TeacherAttendanceFormState): TeacherAttendanceFormState => ({
@@ -1134,9 +1147,21 @@ const App: React.FC = () => {
     setIsPolling(false); // Tambahkan ini
 
     // Dapatkan tanggal dan jam saat ini
-    const now = new Date();
-    const currentDate = now.toISOString().split("T")[0]; // Format: YYYY-MM-DD
-    const currentTime = now.toTimeString().slice(0, 5); // Format: HH:MM
+    const makassarTime = new Intl.DateTimeFormat("id-ID", {
+      timeZone: "Asia/Makassar",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date());
+
+    const getPart = (part) => makassarTime.find((p) => p.type === part)?.value;
+    const currentDate = `${getPart("year")}-${getPart("month")}-${getPart(
+      "day"
+    )}`;
+    const currentTime = `${getPart("hour")}:${getPart("minute")}`.slice(0, 5);
 
     // Reset form dengan tanggal dan jam realtime
     setForm({
@@ -1685,18 +1710,64 @@ const App: React.FC = () => {
   };
 
   const handleDownloadTemplate = () => {
-    // Data header untuk template
-    const templateData = [
-      ["NISN", "Nama", "Kelas"], // Baris header saja
-    ];
+    try {
+      const headers = ["NISN", "Nama", "Kelas"]; // Header template sederhana
+      const data = [headers]; // Hanya header, tanpa data tambahan (kosong)
 
-    // Buat worksheet dan workbook
-    const ws = XLSX.utils.aoa_to_sheet(templateData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Template Siswa");
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      ws["!cols"] = [{ wch: 15 }, { wch: 30 }, { wch: 10 }]; // Lebar kolom opsional untuk tampilan bagus
 
-    // Generate dan download file
-    XLSX.writeFile(wb, "template_siswa.xlsx");
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Template Siswa");
+
+      // Buat blob dari workbook (sama seperti kode-mu)
+      const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([wbout], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+
+      // Nama file dinamis (opsional, seperti kode-mu)
+      const date = new Date()
+        .toLocaleString("id-ID", {
+          day: "2-digit",
+          month: "long",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        })
+        .replace(/ /g, "_")
+        .replace(/:/g, "-");
+      const fileName = `Template_Siswa_${date}.xlsx`;
+
+      // Cek apakah browser mendukung download langsung (handling IE/Edge & Mobile, seperti kode-mu)
+      if (window.navigator && (window.navigator as any).msSaveOrOpenBlob) {
+        // IE & Edge
+        (window.navigator as any).msSaveOrOpenBlob(blob, fileName);
+      } else {
+        // Browser modern & Mobile
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = fileName;
+        link.style.display = "none";
+
+        document.body.appendChild(link);
+        link.click();
+
+        // Cleanup dengan timeout (seperti kode-mu, lebih aman di HP)
+        setTimeout(() => {
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+        }, 100);
+      }
+
+      // Tampilkan notifikasi sukses (seperti kode-mu)
+      alert("✅ Template Excel berhasil diunduh!");
+    } catch (error) {
+      console.error("Error saat download Template Excel:", error);
+      alert("❌ Gagal mengunduh template Excel. Silakan coba lagi.");
+    }
   };
 
   const handleAddTeacher = async () => {
