@@ -280,7 +280,8 @@ const App: React.FC = () => {
       hour12: false,
     }).formatToParts(now);
 
-    const getPart = (part) => makassarTime.find((p) => p.type === part)?.value;
+    const getPart = (part: string) =>
+      makassarTime.find((p) => p.type === part)?.value;
     const date = `${getPart("year")}-${getPart("month")}-${getPart("day")}`;
     const time = `${getPart("hour")}:${getPart("minute")}:${getPart(
       "second"
@@ -357,7 +358,7 @@ const App: React.FC = () => {
         hour12: false,
       }).formatToParts(now);
 
-      const getPart = (part) =>
+      const getPart = (part: string) =>
         makassarTime.find((p) => p.type === part)?.value;
       const time = `${getPart("hour")}:${getPart("minute")}:${getPart(
         "second"
@@ -1157,7 +1158,8 @@ const App: React.FC = () => {
       hour12: false,
     }).formatToParts(new Date());
 
-    const getPart = (part) => makassarTime.find((p) => p.type === part)?.value;
+    const getPart = (part: string) =>
+      makassarTime.find((p) => p.type === part)?.value;
     const currentDate = `${getPart("year")}-${getPart("month")}-${getPart(
       "day"
     )}`;
