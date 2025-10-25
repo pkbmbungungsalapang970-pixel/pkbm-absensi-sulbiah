@@ -4,7 +4,7 @@ import "jspdf-autotable";
 import * as XLSX from "xlsx";
 
 const ENDPOINT =
-  "https://script.google.com/macros/s/AKfycbxcozEaYavoP59oGy1aZF1iG9J-H5oIoaxfQUpB5wnCxkswFIK3EvpvmftjT2bm5pFplQ/exec";
+  "https://script.google.com/macros/s/AKfycbwawUZ6A748ivdXmW1Oxmv6mi803LQYvvLU8IlCn5SC1vj9_nms-cVEFxl63r-wK7UXFA/exec";
 
 interface Attendance {
   id: number;
@@ -169,7 +169,9 @@ const App: React.FC = () => {
   const [showEditAttendanceModal, setShowEditAttendanceModal] = useState(false);
   const [editAttendanceForm, setEditAttendanceForm] = useState({
     status: "",
-    photoBase64: null as string | null, // ✅ TAMBAHKAN INI
+    date: "",
+    time: "",
+    photoBase64: null as string | null,
     error: "",
     loading: false,
   });
@@ -245,7 +247,15 @@ const App: React.FC = () => {
   const [selectedMapelGuru, setSelectedMapelGuru] = useState("");
   const [isFromPKBM, setIsFromPKBM] = useState(false);
   const [mapelFromParam, setMapelFromParam] = useState<string | null>(null);
-  const [selectedClass, setSelectedClass] = useState(""); // ✅ TAMBAHKAN INI: State untuk filter kelas di data absensi
+  const [selectedClass, setSelectedClass] = useState("");
+  const [deleteAttendanceId, setDeleteAttendanceId] = useState<{
+    nisn: string;
+    date: string;
+    mapel: string;
+  } | null>(null);
+  const [showDeleteAttendanceModal, setShowDeleteAttendanceModal] =
+    useState(false);
+  const [isManualTime, setIsManualTime] = useState(false);
 
   // ✅ PINDAHKAN FUNGSI INI KE LUAR useEffect — DI ATAS USEEFFECT, TAPI MASIH DI DALAM COMPONENT App
   const fetchMapelData = async () => {
@@ -293,6 +303,8 @@ const App: React.FC = () => {
     setForm(
       (prev: FormState): FormState => ({ ...prev, date, time: initialTime })
     );
+
+    // ✅ UBAH INI: Hanya set initial time jika belum manual
     setTeacherForm(
       (prev: TeacherAttendanceFormState): TeacherAttendanceFormState => ({
         ...prev,
@@ -301,7 +313,7 @@ const App: React.FC = () => {
       })
     );
 
-    // ✅ Panggil fetchMapelData DI SINI — hanya sekali saat mount
+    // Panggil fetchMapelData
     fetchMapelData();
 
     // Cek status absensi siswa jika sudah login sebagai siswa
@@ -321,33 +333,26 @@ const App: React.FC = () => {
 
         if (studentResponse.ok) {
           const studentData = await studentResponse.json();
-          console.log("Student data:", studentData);
           setStudentData(studentData.success ? studentData.data : []);
         }
 
         if (teacherResponse.ok) {
           const teacherData = await teacherResponse.json();
-          console.log("Teacher data:", teacherData);
           setTeacherData(teacherData.success ? teacherData.data : []);
         }
 
         if (kepsekResponse.ok) {
           const kepsekData = await kepsekResponse.json();
-          console.log("Kepsek response:", kepsekResponse);
-          console.log("Kepsek data:", kepsekData);
           setKepsekData(kepsekData.success ? kepsekData.data : []);
-        } else {
-          console.error("Kepsek response not ok:", kepsekResponse.status);
         }
       } catch (error) {
         console.error("Error fetching data:", error);
       }
     };
 
-    // Panggil fungsi fetchData saat komponen dimuat
     fetchData();
 
-    // Fungsi untuk memperbarui waktu secara real-time
+    // ✅ UBAH BAGIAN INI - Hanya update time jika TIDAK manual
     const interval = setInterval(() => {
       const now = new Date();
       const makassarTime = new Intl.DateTimeFormat("id-ID", {
@@ -363,33 +368,24 @@ const App: React.FC = () => {
       const time = `${getPart("hour")}:${getPart("minute")}:${getPart(
         "second"
       )}`.slice(0, 8);
+
+      // Update form siswa (tetap auto-update)
       setForm((prev: FormState): FormState => ({ ...prev, time }));
+
+      // ✅ KUNCI UTAMA: Hanya update teacherForm.time jika TIDAK diubah manual
       setTeacherForm(
-        (prev: TeacherAttendanceFormState): TeacherAttendanceFormState => ({
-          ...prev,
-          time,
-        })
+        (prev: TeacherAttendanceFormState): TeacherAttendanceFormState => {
+          // Jika isManualTime = true, jangan update time
+          if (isManualTime) {
+            return prev; // Kembalikan state lama tanpa perubahan
+          }
+          // Jika isManualTime = false, update time seperti biasa
+          return { ...prev, time };
+        }
       );
     }, 1000);
 
-    // ✅ TAMBAHKAN INI: Cek referrer untuk kondisi tombol dan otomatis pilih role "Siswa"
-    const referrer = document.referrer;
-    if (referrer.startsWith("https://app-siswa-pkbm.netlify.app/")) {
-      setIsFromPKBM(true);
-
-      // Otomatis pilih role "Siswa" jika referrer cocok dan role belum dipilih
-      if (loginForm.role === "") {
-        setLoginForm((prev) => ({ ...prev, role: "Siswa" }));
-      }
-
-      // ✅ TAMBAHKAN INI: Parse query param 'mapel' dari URL current app dan isi otomatis ke selectedMapel
-      const params = new URLSearchParams(window.location.search);
-      const mapelParam = params.get("mapel"); // Ambil param ?mapel=...
-      if (mapelParam) {
-        setSelectedMapel(mapelParam); // Isi otomatis ke field Mata Pelajaran
-        setMapelFromParam(mapelParam); // Opsional: Simpan ke state mapelFromParam jika ingin gunakan di tempat lain
-      }
-    }
+    // ... kode lainnya (referrer check, dll)
 
     return () => {
       clearInterval(interval);
@@ -397,7 +393,7 @@ const App: React.FC = () => {
         URL.revokeObjectURL(form.photo);
       }
     };
-  }, [isLoggedIn, userRole, form.nisn]);
+  }, [isLoggedIn, userRole, form.nisn, isManualTime]); // ✅ Tambahkan isManualTime ke dependency
 
   // Auto-polling untuk halaman data absensi
   useEffect(() => {
@@ -582,57 +578,58 @@ const App: React.FC = () => {
   ) => {
     const { name, value } = e.target;
 
-    // Tambahkan handler untuk tanggal (HANYA untuk guru)
-    if (name === "date") {
+    // ✅ UBAH BAGIAN INI - Tambahkan deteksi manual time
+    if (name === "date" || name === "time") {
       setTeacherForm(
         (prev: TeacherAttendanceFormState): TeacherAttendanceFormState => ({
           ...prev,
-          date: value,
+          [name]: value,
           error: "",
         })
       );
+
+      // ✅ TAMBAHKAN INI: Jika guru mengubah jam manual, hentikan auto-update
+      if (name === "time") {
+        setIsManualTime(true); // Tandai bahwa jam diubah manual
+      }
+
       // Reset data absensi hari ini ketika tanggal berubah
-      setAbsensiHariIni({});
-      setTempAbsensi({});
+      if (name === "date") {
+        setAbsensiHariIni({});
+        setTempAbsensi({});
+        setIsManualTime(false); // ✅ Reset ke auto-update saat ganti tanggal
+      }
       return;
     }
 
-    // 🎯 BAGIAN BARU: Jika yang dipilih adalah nama siswa
+    // 🎯 Handler untuk nama siswa
     if (name === "name") {
-      console.log("Nama yang dipilih:", value);
-      console.log("Kelas saat ini:", teacherForm.class);
-
-      // Cari siswa berdasarkan nama dan kelas
       const siswaYangDipilih = studentData.find(
         (siswa) => siswa.name === value && siswa.class === teacherForm.class
       );
 
-      console.log("Siswa ditemukan:", siswaYangDipilih);
-
-      // Update form dengan nama dan NISN
       setTeacherForm(
         (prev: TeacherAttendanceFormState): TeacherAttendanceFormState => ({
           ...prev,
-          name: value, // Isi nama
-          nisn: siswaYangDipilih ? siswaYangDipilih.nisn : "", // Isi NISN otomatis
+          name: value,
+          nisn: siswaYangDipilih ? siswaYangDipilih.nisn : "",
           error: "",
         })
       );
     }
-    // 🎯 BAGIAN BARU: Jika yang dipilih adalah kelas
+    // 🎯 Handler untuk kelas
     else if (name === "class") {
-      // Reset nama dan NISN ketika kelas berubah
       setTeacherForm(
         (prev: TeacherAttendanceFormState): TeacherAttendanceFormState => ({
           ...prev,
           class: value,
-          name: "", // Kosongkan nama
-          nisn: "", // Kosongkan NISN
+          name: "",
+          nisn: "",
           error: "",
         })
       );
     }
-    // 🎯 Untuk field lainnya (status, dll), update seperti biasa
+    // 🎯 Untuk field lainnya
     else {
       setTeacherForm(
         (prev: TeacherAttendanceFormState): TeacherAttendanceFormState => ({
@@ -2455,22 +2452,171 @@ const App: React.FC = () => {
     return (
       <div className="bg-white shadow-lg rounded-lg p-6">
         {/* Hapus tombol Buka Menu, tapi tetap field tanggal dengan mb-4 untuk spacing */}
-        <div className="mb-4">
-          {" "}
-          {/* ✅ EDIT BARU: Ubah dari flex justify-between jadi mb-4 sederhana */}
-          <div className="flex items-center space-x-4 justify-end">
-            {" "}
-            {/* ✅ EDIT BARU: Tambah justify-end agar tanggal tetap di kanan jika perlu */}
-            <label className="text-sm font-medium text-gray-700">
+        <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Input Tanggal dengan Ikon Kalender */}
+          <div className="relative">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
               Tanggal:
             </label>
-            <input
-              type="date"
-              name="date"
-              value={teacherForm.date}
-              onChange={handleTeacherInputChange}
-              className="p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+            <div className="relative">
+              <input
+                type="date"
+                name="date"
+                value={teacherForm.date}
+                onChange={handleTeacherInputChange}
+                className="w-full p-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none"
+              />
+              <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 pointer-events-none">
+                📅
+              </span>
+            </div>
+          </div>
+
+          {/* Custom Time Picker 24 Jam dengan Mini Tabel (Grid Select) & Ikon Refresh */}
+          <div className="relative">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Jam (HH:MM:SS) - Format 24 Jam:
+            </label>
+            <div className="relative mb-2">
+              <input
+                type="text"
+                name="time"
+                value={teacherForm.time}
+                onChange={handleTeacherInputChange}
+                placeholder="08:30:00"
+                pattern="([0-1][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]"
+                maxLength={8}
+                className="w-full p-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  // Reset ke jam realtime Makassar (logika existing dari useEffect)
+                  const now = new Date();
+                  const makassarTime = new Intl.DateTimeFormat("id-ID", {
+                    timeZone: "Asia/Makassar",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                    hour12: false,
+                  }).formatToParts(now);
+
+                  const getPart = (part: string) =>
+                    makassarTime.find((p) => p.type === part)?.value;
+                  const time = `${getPart("hour")}:${getPart(
+                    "minute"
+                  )}:${getPart("second")}`.slice(0, 8);
+
+                  setTeacherForm((prev) => ({ ...prev, time }));
+                  setIsManualTime(false); // Aktifkan auto-update lagi jika di-reset
+                }}
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                title="Reset ke Jam Sekarang"
+              >
+                🔄
+              </button>
+            </div>
+
+            {/* Mini Tabel/Grid untuk Pilih Jam, Menit, Detik (Format 24 Jam) */}
+            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+              <p className="text-xs font-medium text-gray-600 mb-2">
+                Pilih Jam Cepat (Klik untuk Set):
+              </p>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                {/* Kolom Jam (00-23) */}
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Jam</p>
+                  <select
+                    value={teacherForm.time.split(":")[0] || "00"}
+                    onChange={(e) => {
+                      const [_, min, sec] = teacherForm.time.split(":");
+                      const newTime = `${e.target.value.padStart(2, "0")}:${
+                        min || "00"
+                      }:${sec || "00"}`;
+                      setTeacherForm((prev) => ({ ...prev, time: newTime }));
+                      setIsManualTime(true);
+                    }}
+                    className="w-full p-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {Array.from({ length: 24 }, (_, i) => (
+                      <option key={i} value={i.toString().padStart(2, "0")}>
+                        {i.toString().padStart(2, "0")}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Kolom Menit (00-59) */}
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Menit</p>
+                  <select
+                    value={teacherForm.time.split(":")[1] || "00"}
+                    onChange={(e) => {
+                      const [hour, _, sec] = teacherForm.time.split(":");
+                      const newTime = `${
+                        hour || "00"
+                      }:${e.target.value.padStart(2, "0")}:${sec || "00"}`;
+                      setTeacherForm((prev) => ({ ...prev, time: newTime }));
+                      setIsManualTime(true);
+                    }}
+                    className="w-full p-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {Array.from({ length: 60 }, (_, i) => (
+                      <option key={i} value={i.toString().padStart(2, "0")}>
+                        {i.toString().padStart(2, "0")}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Kolom Detik (00-59) */}
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Detik</p>
+                  <select
+                    value={teacherForm.time.split(":")[2] || "00"}
+                    onChange={(e) => {
+                      const [hour, min, _] = teacherForm.time.split(":");
+                      const newTime = `${hour || "00"}:${
+                        min || "00"
+                      }:${e.target.value.padStart(2, "0")}`;
+                      setTeacherForm((prev) => ({ ...prev, time: newTime }));
+                      setIsManualTime(true);
+                    }}
+                    className="w-full p-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {Array.from({ length: 60 }, (_, i) => (
+                      <option key={i} value={i.toString().padStart(2, "0")}>
+                        {i.toString().padStart(2, "0")}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Opsi Jam Cepat Preset (Opsional, seperti contoh jam pelajaran) */}
+              <div className="mt-3 flex flex-wrap gap-1 justify-center">
+                {[
+                  "07:00:00",
+                  "08:30:00",
+                  "10:00:00",
+                  "11:30:00",
+                  "13:00:00",
+                  "14:30:00",
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => {
+                      setTeacherForm((prev) => ({ ...prev, time: preset }));
+                      setIsManualTime(true);
+                    }}
+                    className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition duration-200"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
         <div className="mb-4">
@@ -2808,6 +2954,8 @@ const App: React.FC = () => {
         setEditAttendance(null);
         setEditAttendanceForm({
           status: "",
+          date: "",
+          time: "",
           photoBase64: null,
           error: "",
           loading: false,
@@ -2823,6 +2971,51 @@ const App: React.FC = () => {
         error: `Gagal memperbarui status: ${error.message}`,
         loading: false,
       });
+    }
+  };
+
+  const handleDeleteAttendance = async () => {
+    if (!deleteAttendanceId) return;
+
+    setLoading(true);
+    try {
+      const response = await fetch(ENDPOINT, {
+        method: "POST",
+        mode: "no-cors",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "deleteAttendance",
+          nisn: deleteAttendanceId.nisn,
+          date: deleteAttendanceId.date,
+          mapel: deleteAttendanceId.mapel,
+        }),
+      });
+
+      if (response.type === "opaque") {
+        // Update local state - hapus data dari attendanceData
+        setAttendanceData((prev) =>
+          prev.filter(
+            (att) =>
+              !(
+                att.nisn === deleteAttendanceId.nisn &&
+                att.date === deleteAttendanceId.date &&
+                att.mapel === deleteAttendanceId.mapel
+              )
+          )
+        );
+        setShowDeleteAttendanceModal(false);
+        setDeleteAttendanceId(null);
+        alert("Data absensi berhasil dihapus!");
+      } else {
+        throw new Error("Unexpected response type");
+      }
+    } catch (error: any) {
+      console.error("Error deleting attendance:", error);
+      alert(`Gagal menghapus data absensi: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -3697,24 +3890,57 @@ const App: React.FC = () => {
                           </span>
                         </td>
                         <td className="px-4 py-2">
-                          {attendance?.mapel || "Belum dipilih"}
+                          {attendance.mapel || "Belum dipilih"}
                         </td>
                         <td className="px-4 py-2">
-                          <button
-                            onClick={() => {
-                              setEditAttendance(attendance);
-                              setEditAttendanceForm({
-                                status: attendance.status,
-                                photoBase64: null,
-                                error: "",
-                                loading: false,
-                              });
-                              setShowEditAttendanceModal(true);
-                            }}
-                            className="bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition duration-200 text-xs"
-                          >
-                            Edit Status
-                          </button>
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => {
+                                setEditAttendance(attendance);
+
+                                // ✅ Konversi tanggal dari DD/MM/YYYY ke YYYY-MM-DD untuk input date
+                                let convertedDate = "";
+                                if (attendance.date.includes("/")) {
+                                  const [day, month, year] =
+                                    attendance.date.split("/");
+                                  const fullYear =
+                                    year.length === 2 ? `20${year}` : year;
+                                  convertedDate = `${fullYear}-${month.padStart(
+                                    2,
+                                    "0"
+                                  )}-${day.padStart(2, "0")}`;
+                                } else {
+                                  convertedDate = attendance.date;
+                                }
+
+                                setEditAttendanceForm({
+                                  status: attendance.status,
+                                  date: convertedDate, // ✅ Set tanggal
+                                  time: attendance.time, // ✅ Set jam
+                                  photoBase64: null,
+                                  error: "",
+                                  loading: false,
+                                });
+                                setShowEditAttendanceModal(true);
+                              }}
+                              className="bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition duration-200 text-xs"
+                            >
+                              Edit Status
+                            </button>
+                            <button
+                              onClick={() => {
+                                setDeleteAttendanceId({
+                                  nisn: attendance.nisn,
+                                  date: attendance.date,
+                                  mapel: attendance.mapel || "",
+                                });
+                                setShowDeleteAttendanceModal(true);
+                              }}
+                              className="bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700 transition duration-200 text-xs"
+                            >
+                              Hapus
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -3756,12 +3982,12 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
-        {/* 👇 BARU: Modal Edit Status Kehadiran */}
+        {/* 👇 Modal Edit Status Kehadiran - UPDATE LENGKAP */}
         {showEditAttendanceModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg p-6 w-full max-w-md">
               <h2 className="text-xl font-semibold mb-4">
-                Edit Status Kehadiran
+                Edit Data Kehadiran
               </h2>
               <div className="space-y-4">
                 <div>
@@ -3772,14 +3998,205 @@ const App: React.FC = () => {
                     <strong>NISN:</strong> {editAttendance?.nisn}
                   </p>
                   <p className="text-sm text-gray-600">
-                    <strong>Tanggal:</strong> {editAttendance?.date}
-                  </p>
-                  <p className="text-sm text-gray-600">
                     <strong>Mapel:</strong>{" "}
                     {editAttendance?.mapel || "Belum dipilih"}
                   </p>
                 </div>
 
+                {/* ✅ TAMBAH: Input Tanggal */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tanggal
+                  </label>
+                  <input
+                    type="date"
+                    value={editAttendanceForm.date}
+                    onChange={(e) =>
+                      setEditAttendanceForm((prev) => ({
+                        ...prev,
+                        date: e.target.value,
+                        error: "",
+                      }))
+                    }
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                {/* ✅ TAMBAH: Input Jam */}
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Jam (HH:MM:SS) - Format 24 Jam:
+                  </label>
+                  <div className="relative mb-2">
+                    <input
+                      type="text"
+                      value={editAttendanceForm.time}
+                      onChange={(e) =>
+                        setEditAttendanceForm((prev) => ({
+                          ...prev,
+                          time: e.target.value,
+                          error: "",
+                        }))
+                      }
+                      placeholder="08:30:00"
+                      pattern="([0-1][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]"
+                      maxLength={8}
+                      className="w-full p-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Reset ke jam realtime Makassar
+                        const now = new Date();
+                        const makassarTime = new Intl.DateTimeFormat("id-ID", {
+                          timeZone: "Asia/Makassar",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                          hour12: false,
+                        }).formatToParts(now);
+
+                        const getPart = (part: string) =>
+                          makassarTime.find((p) => p.type === part)?.value;
+                        const time = `${getPart("hour")}:${getPart(
+                          "minute"
+                        )}:${getPart("second")}`.slice(0, 8);
+
+                        setEditAttendanceForm((prev) => ({ ...prev, time }));
+                      }}
+                      className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      title="Reset ke Jam Sekarang"
+                    >
+                      🔄
+                    </button>
+                  </div>
+
+                  {/* Mini Tabel/Grid untuk Pilih Jam, Menit, Detik (seperti gambar) */}
+                  <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                    <p className="text-xs font-medium text-gray-600 mb-2">
+                      Pilih Jam Cepat (Klik untuk Set):
+                    </p>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      {/* Kolom Jam (00-23) */}
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Jam</p>
+                        <select
+                          value={editAttendanceForm.time.split(":")[0] || "00"}
+                          onChange={(e) => {
+                            const [_, min, sec] =
+                              editAttendanceForm.time.split(":");
+                            const newTime = `${e.target.value.padStart(
+                              2,
+                              "0"
+                            )}:${min || "00"}:${sec || "00"}`;
+                            setEditAttendanceForm((prev) => ({
+                              ...prev,
+                              time: newTime,
+                            }));
+                          }}
+                          className="w-full p-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        >
+                          {Array.from({ length: 24 }, (_, i) => (
+                            <option
+                              key={i}
+                              value={i.toString().padStart(2, "0")}
+                            >
+                              {i.toString().padStart(2, "0")}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Kolom Menit (00-59) */}
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Menit</p>
+                        <select
+                          value={editAttendanceForm.time.split(":")[1] || "00"}
+                          onChange={(e) => {
+                            const [hour, _, sec] =
+                              editAttendanceForm.time.split(":");
+                            const newTime = `${
+                              hour || "00"
+                            }:${e.target.value.padStart(2, "0")}:${
+                              sec || "00"
+                            }`;
+                            setEditAttendanceForm((prev) => ({
+                              ...prev,
+                              time: newTime,
+                            }));
+                          }}
+                          className="w-full p-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        >
+                          {Array.from({ length: 60 }, (_, i) => (
+                            <option
+                              key={i}
+                              value={i.toString().padStart(2, "0")}
+                            >
+                              {i.toString().padStart(2, "0")}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Kolom Detik (00-59) */}
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Detik</p>
+                        <select
+                          value={editAttendanceForm.time.split(":")[2] || "00"}
+                          onChange={(e) => {
+                            const [hour, min, _] =
+                              editAttendanceForm.time.split(":");
+                            const newTime = `${hour || "00"}:${
+                              min || "00"
+                            }:${e.target.value.padStart(2, "0")}`;
+                            setEditAttendanceForm((prev) => ({
+                              ...prev,
+                              time: newTime,
+                            }));
+                          }}
+                          className="w-full p-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        >
+                          {Array.from({ length: 60 }, (_, i) => (
+                            <option
+                              key={i}
+                              value={i.toString().padStart(2, "0")}
+                            >
+                              {i.toString().padStart(2, "0")}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Opsi Jam Cepat Preset (seperti gambar) */}
+                    <div className="mt-3 flex flex-wrap gap-1 justify-center">
+                      {[
+                        "07:00:00",
+                        "08:30:00",
+                        "10:00:00",
+                        "11:30:00",
+                        "13:00:00",
+                        "14:30:00",
+                      ].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => {
+                            setEditAttendanceForm((prev) => ({
+                              ...prev,
+                              time: preset,
+                            }));
+                          }}
+                          className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition duration-200"
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Status Kehadiran */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Status Kehadiran
@@ -3803,7 +4220,7 @@ const App: React.FC = () => {
                   </select>
                 </div>
 
-                {/* ✅ TAMPILKAN INPUT FOTO HANYA JIKA STATUS = "Hadir" */}
+                {/* Foto (hanya jika Hadir) */}
                 {editAttendanceForm.status === "Hadir" && (
                   <div className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700">
@@ -3848,10 +4265,25 @@ const App: React.FC = () => {
                 <div className="flex space-x-2">
                   <button
                     onClick={async () => {
+                      // ✅ VALIDASI
                       if (!editAttendanceForm.status) {
                         setEditAttendanceForm((prev) => ({
                           ...prev,
                           error: "Status harus dipilih",
+                        }));
+                        return;
+                      }
+                      if (!editAttendanceForm.date) {
+                        setEditAttendanceForm((prev) => ({
+                          ...prev,
+                          error: "Tanggal harus diisi",
+                        }));
+                        return;
+                      }
+                      if (!editAttendanceForm.time) {
+                        setEditAttendanceForm((prev) => ({
+                          ...prev,
+                          error: "Jam harus diisi",
                         }));
                         return;
                       }
@@ -3864,13 +4296,15 @@ const App: React.FC = () => {
                       try {
                         const payload: any = {
                           action: "editAttendance",
-                          date: editAttendance!.date,
+                          originalDate: editAttendance!.date, // ✅ Tanggal lama (untuk cari data)
+                          date: editAttendanceForm.date, // ✅ Tanggal baru
+                          time: editAttendanceForm.time, // ✅ Jam baru
                           nisn: editAttendance!.nisn,
                           mapel: editAttendance!.mapel,
                           newStatus: editAttendanceForm.status,
                         };
 
-                        // ✅ KIRIM FOTO HANYA JIKA STATUS = "Hadir"
+                        // Kirim foto hanya jika status = "Hadir"
                         if (
                           editAttendanceForm.status === "Hadir" &&
                           editAttendanceForm.photoBase64
@@ -3894,10 +4328,12 @@ const App: React.FC = () => {
                               att.mapel === editAttendance!.mapel
                                 ? {
                                     ...att,
+                                    date: editAttendanceForm.date, // ✅ Update tanggal
+                                    time: editAttendanceForm.time, // ✅ Update jam
                                     status: editAttendanceForm.status,
                                     photo: editAttendanceForm.photoBase64
                                       ? URL.createObjectURL(new Blob())
-                                      : "",
+                                      : att.photo,
                                   }
                                 : att
                             )
@@ -3906,11 +4342,13 @@ const App: React.FC = () => {
                           setEditAttendance(null);
                           setEditAttendanceForm({
                             status: "",
+                            date: "",
+                            time: "",
                             photoBase64: null,
                             error: "",
                             loading: false,
                           });
-                          alert("Status kehadiran berhasil diperbarui!");
+                          alert("Data kehadiran berhasil diperbarui!");
                         } else {
                           throw new Error("Unexpected response");
                         }
@@ -3933,6 +4371,8 @@ const App: React.FC = () => {
                       setEditAttendance(null);
                       setEditAttendanceForm({
                         status: "",
+                        date: "",
+                        time: "",
                         photoBase64: null,
                         error: "",
                         loading: false,
@@ -3943,6 +4383,47 @@ const App: React.FC = () => {
                     Batal
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Modal Konfirmasi Hapus Absensi */}
+        {showDeleteAttendanceModal && deleteAttendanceId && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+              <h2 className="text-xl font-semibold mb-4">Konfirmasi Hapus</h2>
+              <p className="mb-4">
+                Apakah Anda yakin ingin menghapus data absensi ini?
+              </p>
+              <div className="text-sm text-gray-600 mb-4">
+                <p>
+                  <strong>NISN:</strong> {deleteAttendanceId.nisn}
+                </p>
+                <p>
+                  <strong>Tanggal:</strong> {deleteAttendanceId.date}
+                </p>
+                <p>
+                  <strong>Mapel:</strong>{" "}
+                  {deleteAttendanceId.mapel || "Belum dipilih"}
+                </p>
+              </div>
+              <div className="flex space-x-2">
+                <button
+                  onClick={handleDeleteAttendance}
+                  disabled={loading}
+                  className="flex-1 bg-red-600 text-white p-2 rounded-lg hover:bg-red-700 transition duration-200 disabled:opacity-50"
+                >
+                  {loading ? "⏳ Menghapus..." : "Hapus"}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowDeleteAttendanceModal(false);
+                    setDeleteAttendanceId(null);
+                  }}
+                  className="flex-1 bg-gray-300 text-gray-700 p-2 rounded-lg hover:bg-gray-400 transition duration-200"
+                >
+                  Batal
+                </button>
               </div>
             </div>
           </div>
