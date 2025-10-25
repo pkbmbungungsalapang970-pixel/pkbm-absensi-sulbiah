@@ -256,6 +256,30 @@ const App: React.FC = () => {
   const [showDeleteAttendanceModal, setShowDeleteAttendanceModal] =
     useState(false);
   const [isManualTime, setIsManualTime] = useState(false);
+  const [isManualDate, setIsManualDate] = useState(false);
+  const [isCheckingAttendance, setIsCheckingAttendance] = useState(false);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const fromPKBM = urlParams.get("from") === "pkbm";
+    const mapelParam = urlParams.get("mapel");
+
+    if (fromPKBM) {
+      setIsFromPKBM(true);
+
+      // Auto-set role ke Siswa
+      setLoginForm((prev) => ({
+        ...prev,
+        role: "Siswa",
+      }));
+
+      // Auto-set mapel jika ada di URL
+      if (mapelParam) {
+        setSelectedMapel(mapelParam);
+        setMapelFromParam(mapelParam);
+      }
+    }
+  }, []);
 
   // ✅ PINDAHKAN FUNGSI INI KE LUAR useEffect — DI ATAS USEEFFECT, TAPI MASIH DI DALAM COMPONENT App
   const fetchMapelData = async () => {
@@ -304,13 +328,19 @@ const App: React.FC = () => {
       (prev: FormState): FormState => ({ ...prev, date, time: initialTime })
     );
 
-    // ✅ UBAH INI: Hanya set initial time jika belum manual
+    // ✅ KODE BARU: Hanya set initial jika BELUM diubah manual
     setTeacherForm(
-      (prev: TeacherAttendanceFormState): TeacherAttendanceFormState => ({
-        ...prev,
-        date,
-        time: initialTime,
-      })
+      (prev: TeacherAttendanceFormState): TeacherAttendanceFormState => {
+        // Jika tanggal atau jam sudah diubah manual, jangan update
+        if (isManualDate || isManualTime) {
+          return prev;
+        }
+        return {
+          ...prev,
+          date,
+          time: initialTime,
+        };
+      }
     );
 
     // Panggil fetchMapelData
@@ -385,7 +415,25 @@ const App: React.FC = () => {
       );
     }, 1000);
 
-    // ... kode lainnya (referrer check, dll)
+    const referrer = document.referrer;
+    if (
+      referrer.includes("app-siswa-pkbm.netlify.app") ||
+      window.location.search.includes("from=pkbm")
+    ) {
+      setIsFromPKBM(true);
+      setLoginForm((prev) => ({
+        ...prev,
+        role: "Siswa",
+      }));
+
+      // Cek URL parameter untuk mapel
+      const urlParams = new URLSearchParams(window.location.search);
+      const mapelParam = urlParams.get("mapel");
+      if (mapelParam) {
+        setSelectedMapel(mapelParam);
+        setMapelFromParam(mapelParam);
+      }
+    }
 
     return () => {
       clearInterval(interval);
@@ -393,7 +441,7 @@ const App: React.FC = () => {
         URL.revokeObjectURL(form.photo);
       }
     };
-  }, [isLoggedIn, userRole, form.nisn, isManualTime]); // ✅ Tambahkan isManualTime ke dependency
+  }, [isLoggedIn, userRole, form.nisn, isManualTime, isManualDate]); // ✅ Tambahkan isManualTime ke dependency
 
   // Auto-polling untuk halaman data absensi
   useEffect(() => {
@@ -495,6 +543,7 @@ const App: React.FC = () => {
     date: string,
     mapel: string
   ) => {
+    setIsCheckingAttendance(true); // ✅ Set loading jadi true
     try {
       const response = await fetch(
         `${ENDPOINT}?action=getAttendanceData&_t=${Date.now()}`
@@ -510,11 +559,10 @@ const App: React.FC = () => {
                 ? attendance.date.split("/").reverse().join("-")
                 : attendance.date;
 
-              // ✅ Tambahkan cek mapel!
               return (
                 attendance.nisn === nisn &&
                 attendanceDate === date &&
-                attendance.mapel === mapel // 👈 INI YANG BARU!
+                attendance.mapel === mapel
               );
             }
           );
@@ -522,12 +570,14 @@ const App: React.FC = () => {
           setStudentAttendanceStatus({
             hasAttended: !!existingAttendance,
             attendanceDate: existingAttendance?.date || "",
-            attendedMapel: existingAttendance?.mapel || "", // Simpan mapel yang sudah diabsen
+            attendedMapel: existingAttendance?.mapel || "",
           });
         }
       }
     } catch (error) {
       console.error("Error checking student attendance:", error);
+    } finally {
+      setIsCheckingAttendance(false); // ✅ Set loading jadi false setelah selesai
     }
   };
 
@@ -578,27 +628,38 @@ const App: React.FC = () => {
   ) => {
     const { name, value } = e.target;
 
-    // ✅ UBAH BAGIAN INI - Tambahkan deteksi manual time
-    if (name === "date" || name === "time") {
+    // ✅ KODE BARU - Handle date dan time secara terpisah
+    if (name === "date") {
       setTeacherForm(
         (prev: TeacherAttendanceFormState): TeacherAttendanceFormState => ({
           ...prev,
-          [name]: value,
+          date: value,
           error: "",
         })
       );
 
-      // ✅ TAMBAHKAN INI: Jika guru mengubah jam manual, hentikan auto-update
-      if (name === "time") {
-        setIsManualTime(true); // Tandai bahwa jam diubah manual
-      }
+      // ✅ PENTING: Tandai bahwa tanggal diubah manual
+      setIsManualDate(true);
 
       // Reset data absensi hari ini ketika tanggal berubah
-      if (name === "date") {
-        setAbsensiHariIni({});
-        setTempAbsensi({});
-        setIsManualTime(false); // ✅ Reset ke auto-update saat ganti tanggal
-      }
+      setAbsensiHariIni({});
+      setTempAbsensi({});
+
+      return;
+    }
+
+    if (name === "time") {
+      setTeacherForm(
+        (prev: TeacherAttendanceFormState): TeacherAttendanceFormState => ({
+          ...prev,
+          time: value,
+          error: "",
+        })
+      );
+
+      // ✅ PENTING: Tandai bahwa jam diubah manual
+      setIsManualTime(true);
+
       return;
     }
 
@@ -1142,7 +1203,9 @@ const App: React.FC = () => {
     setIsLoggedIn(false);
     setUserRole(null);
     setCurrentPage("form");
-    setIsPolling(false); // Tambahkan ini
+    setIsPolling(false);
+    setIsManualTime(false);
+    setIsManualDate(false);
 
     // Dapatkan tanggal dan jam saat ini
     const makassarTime = new Intl.DateTimeFormat("id-ID", {
@@ -2273,7 +2336,18 @@ const App: React.FC = () => {
   );
 
   const renderFormPage = () => (
-    <div className="bg-white shadow-lg rounded-lg p-6">
+    <div className="bg-white shadow-lg rounded-lg p-6 relative">
+      {/* ✅ TAMBAHKAN INI: Overlay loading ketika sedang cek attendance */}
+      {isCheckingAttendance && (
+        <div className="absolute inset-0 bg-white bg-opacity-90 flex items-center justify-center z-10 rounded-lg">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+            <p className="text-gray-700 font-medium">Memuat data absensi...</p>
+            <p className="text-gray-500 text-sm mt-2">Mohon tunggu sebentar</p>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-4">
           <div className="grid grid-cols-2 gap-4">
@@ -2282,14 +2356,16 @@ const App: React.FC = () => {
               name="date"
               value={form.date}
               readOnly
-              className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700"
+              disabled={isCheckingAttendance} // ✅ Disable saat loading
+              className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 disabled:opacity-50"
             />
             <input
               type="text"
               name="time"
               value={form.time}
               readOnly
-              className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700"
+              disabled={isCheckingAttendance} // ✅ Disable saat loading
+              className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 disabled:opacity-50"
             />
           </div>
 
@@ -2298,7 +2374,8 @@ const App: React.FC = () => {
             name="mapel"
             value={form.mapel || "Belum dipilih"}
             readOnly
-            className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700"
+            disabled={isCheckingAttendance} // ✅ Disable saat loading
+            className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 disabled:opacity-50"
           />
 
           <input
@@ -2306,7 +2383,8 @@ const App: React.FC = () => {
             name="class"
             value={form.class}
             readOnly
-            className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700"
+            disabled={isCheckingAttendance} // ✅ Disable saat loading
+            className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 disabled:opacity-50"
           />
 
           <input
@@ -2314,7 +2392,8 @@ const App: React.FC = () => {
             name="name"
             value={form.name}
             readOnly
-            className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700"
+            disabled={isCheckingAttendance} // ✅ Disable saat loading
+            className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 disabled:opacity-50"
           />
 
           <input
@@ -2322,7 +2401,8 @@ const App: React.FC = () => {
             name="nisn"
             value={form.nisn}
             readOnly
-            className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700"
+            disabled={isCheckingAttendance} // ✅ Disable saat loading
+            className="w-full p-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 disabled:opacity-50"
           />
 
           <div className="space-y-2">
@@ -2331,6 +2411,7 @@ const App: React.FC = () => {
               type="file"
               accept="image/*"
               onChange={handleFileSelect}
+              disabled={isCheckingAttendance} // ✅ Disable saat loading
               style={{ display: "none" }}
             />
 
@@ -2339,7 +2420,7 @@ const App: React.FC = () => {
                 <button
                   type="button"
                   onClick={openCameraApp}
-                  disabled={form.loading}
+                  disabled={form.loading || isCheckingAttendance} // ✅ Disable saat loading
                   className="w-full bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 transition duration-200 flex items-center justify-center disabled:opacity-50"
                 >
                   {form.loading ? "⏳ Memproses..." : "📸 Buka Kamera HP"}
@@ -2361,14 +2442,16 @@ const App: React.FC = () => {
                   <button
                     type="button"
                     onClick={retakePhoto}
-                    className="flex-1 bg-yellow-600 text-white p-2 rounded-lg hover:bg-yellow-700 transition duration-200"
+                    disabled={isCheckingAttendance} // ✅ Disable saat loading
+                    className="flex-1 bg-yellow-600 text-white p-2 rounded-lg hover:bg-yellow-700 transition duration-200 disabled:opacity-50"
                   >
                     📸 Ambil Ulang
                   </button>
                   <button
                     type="button"
                     onClick={openCameraApp}
-                    className="flex-1 bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition duration-200"
+                    disabled={isCheckingAttendance} // ✅ Disable saat loading
+                    className="flex-1 bg-blue-600 text-white p-2 rounded-lg hover:bg-blue-700 transition duration-200 disabled:opacity-50"
                   >
                     📷 Foto Lain
                   </button>
@@ -2395,7 +2478,7 @@ const App: React.FC = () => {
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!form.photoBase64 || form.loading}
+            disabled={!form.photoBase64 || form.loading || isCheckingAttendance} // ✅ Disable saat loading
             className="w-full bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {form.loading ? "⏳ Menyimpan..." : "✅ Tambah Absen"}
@@ -2403,6 +2486,7 @@ const App: React.FC = () => {
         )}
       </div>
 
+      {/* Tabel tetap sama seperti sebelumnya */}
       <div className="mt-6 overflow-x-auto">
         <table className="w-full text-sm text-left text-gray-700">
           <thead className="text-xs uppercase bg-gray-200">
@@ -2414,7 +2498,7 @@ const App: React.FC = () => {
               <th className="px-4 py-2">NISN</th>
               <th className="px-4 py-2">Foto</th>
               <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Mapel</th> {/* 👈 BARU! */}
+              <th className="px-4 py-2">Mapel</th>
             </tr>
           </thead>
           <tbody>
@@ -2436,6 +2520,8 @@ const App: React.FC = () => {
                     <span className="text-gray-500">Tidak ada foto</span>
                   )}
                 </td>
+                <td className="px-4 py-2">{attendance.status}</td>
+                <td className="px-4 py-2">{attendance.mapel}</td>
               </tr>
             ))}
           </tbody>
@@ -2470,6 +2556,34 @@ const App: React.FC = () => {
                 📅
               </span>
             </div>
+            {isManualDate && (
+              <button
+                type="button"
+                onClick={() => {
+                  const now = new Date();
+                  const makassarTime = new Intl.DateTimeFormat("id-ID", {
+                    timeZone: "Asia/Makassar",
+                    year: "numeric",
+                    month: "2-digit",
+                    day: "2-digit",
+                  }).formatToParts(now);
+
+                  const getPart = (part: string) =>
+                    makassarTime.find((p) => p.type === part)?.value;
+                  const date = `${getPart("year")}-${getPart(
+                    "month"
+                  )}-${getPart("day")}`;
+
+                  setTeacherForm((prev) => ({ ...prev, date }));
+                  setIsManualDate(false);
+                  setAbsensiHariIni({});
+                  setTempAbsensi({});
+                }}
+                className="mt-1 text-xs text-blue-600 hover:text-blue-800 underline"
+              >
+                🔄 Reset ke Hari Ini
+              </button>
+            )}
           </div>
 
           {/* Custom Time Picker 24 Jam dengan Mini Tabel (Grid Select) & Ikon Refresh */}
